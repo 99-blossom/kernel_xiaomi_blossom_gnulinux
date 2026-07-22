@@ -1,0 +1,140 @@
+#!/bin/busybox sh
+# vars
+rootfs="/dev/mmcblk0p41" # change if necessary, default if root= parameter is missin
+newroot="/mnt/newroot" # change if necessary
+switch_init="/sbin/openrc-init" # change if necessary
+root_timeout=25
+
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev
+exec 0<>/dev/tty1 1>&0 2>&0
+busybox | busybox head -n 1
+
+for arg in $(/bin/busybox cat /proc/cmdline); do
+    case "$arg" in
+        root=/dev/ram*)
+            /bin/busybox echo "Detected $arg parameter in cmdline, ignoring."
+            ;;
+        root=*)
+            rootfs="${arg#root=}"
+            ;;
+    esac
+done
+
+# usb gadget
+/bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null || true
+/bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1
+
+acm_success=0
+
+if [ -d /sys/kernel/config/usb_gadget/g1 ]; then
+    echo "0x2717" > /sys/kernel/config/usb_gadget/g1/idVendor
+    echo "0xff40" > /sys/kernel/config/usb_gadget/g1/idProduct
+    echo "0x0100" > /sys/kernel/config/usb_gadget/g1/bcdDevice
+    echo "0x0200" > /sys/kernel/config/usb_gadget/g1/bcdUSB
+
+    /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/strings/0x409
+    echo "Xiaomi" > /sys/kernel/config/usb_gadget/g1/strings/0x409/manufacturer
+    echo "Redmi 9C NFC" > /sys/kernel/config/usb_gadget/g1/strings/0x409/product
+    SERIALNO=$(/bin/busybox cat /proc/cmdline | /bin/busybox grep -o 'androidboot.serialno=[^ ]*' | /bin/busybox cut -d'=' -f2)
+    echo "$SERIALNO" > /sys/kernel/config/usb_gadget/g1/strings/0x409/serialnumber
+
+    /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/configs/c.1
+    /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/configs/c.1/strings/0x409
+    echo "ACM Console" > /sys/kernel/config/usb_gadget/g1/configs/c.1/strings/0x409/configuration
+
+    /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/functions/acm.usb0
+    /bin/busybox ln -sf /sys/kernel/config/usb_gadget/g1/functions/acm.usb0 /sys/kernel/config/usb_gadget/g1/configs/c.1/
+
+    UDC_NAME=$(/bin/busybox ls /sys/class/udc 2>/dev/null | /bin/busybox head -n 1)
+    if [ -n "$UDC_NAME" ]; then
+        if echo "$UDC_NAME" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null; then
+            counter=0
+            while [ ! -c /dev/ttyGS0 ] && [ "$counter" -lt 10 ]; do
+                /bin/busybox sleep 0.1
+                counter=$((counter + 1))
+            done
+            if [ -c /dev/ttyGS0 ]; then
+                acm_success=1
+            fi
+        fi
+    fi
+fi
+
+if [ "$acm_success" -eq 1 ]; then
+    /bin/busybox echo "Serial console (ACM) initialized successfully"
+else
+    /bin/busybox echo "Warning: Serial console (ACM) failed to initialize"
+fi
+/bin/busybox mkdir -p /mnt/newroot
+
+fail() {
+    /bin/busybox clear
+    /bin/busybox printf "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+    /bin/busybox echo "$@"
+    /bin/busybox printf "\n"
+    /bin/busybox echo "Here is some debug information:"
+    /bin/busybox dmesg | /bin/busybox grep "Kernel command line"
+    /bin/busybox uname -a
+    /bin/busybox printf "\n"
+    /bin/busybox echo "Last 25 kernel messages:"
+    /bin/busybox dmesg | /bin/busybox tail -n 25
+    /bin/busybox printf "\n"
+    /bin/busybox echo "$@"
+    /bin/busybox printf "\n"
+    /bin/busybox echo "You are now being dropped into an emergency shell. Use OTG-keyboard"
+    /bin/busybox echo "or connect to the USB ACM serial port (e.g. /dev/ttyACM0 on Linux) on your PC via screen/PuTTY or what have you"
+    /bin/busybox printf "\n"
+    if [ -c /dev/ttyGS0 ]; then
+        /bin/busybox sh </dev/ttyGS0 >/dev/ttyGS0 2>&0 &
+    fi
+    while true; do
+        /bin/busybox sh
+    done
+}
+
+/bin/busybox printf "Waiting for root device %s (timeout %ss)..." "$rootfs" "$root_timeout"
+counter=0
+while [ ! -b "$rootfs" ]; do
+    if [ "$counter" -ge "$root_timeout" ]; then
+        /bin/busybox printf "\n"
+        fail "Root device $rootfs not found (timeout reached)"
+    fi
+    /bin/busybox sleep 1
+    /bin/busybox printf "."
+    counter=$((counter + 1))
+done
+/bin/busybox printf "\n\n"
+
+err=$(/bin/busybox mount "$rootfs" "$newroot" 2>&1)
+if [ $? -ne 0 ]; then
+    fail "$err"
+fi
+
+if [ "$switch_init" != "/bin/sh" ] && [ ! -x "$newroot$switch_init" ]; then
+    fail "Root device mounted successfully, but $switch_init does not exist."
+fi
+
+err_msg=""
+if ! /bin/busybox mountpoint -q "$newroot"; then
+    err_msg="newroot is not a mountpoint"
+elif [ ! -x "$newroot$switch_init" ]; then
+    err_msg="$switch_init is not executable or missing"
+fi
+
+if [ -n "$err_msg" ]; then
+    fail "Root device mounted successfully, $switch_init exists (supposedly), but pre-check failed: $err_msg"
+fi
+
+/bin/busybox mkdir -p "$newroot/dev"
+/bin/busybox mkdir -p "$newroot/proc"
+/bin/busybox mkdir -p "$newroot/sys"
+/bin/busybox mount --move /dev "$newroot/dev"
+/bin/busybox mount --move /proc "$newroot/proc"
+/bin/busybox mount --move /sys "$newroot/sys"
+
+exec /bin/busybox switch_root -c /dev/tty1 "$newroot" "$switch_init"
+
+# should never reach here
+fail "Fatal: switch_root returned. This should never happen. Try reflashing the boot image or updating to a newer version if available"
