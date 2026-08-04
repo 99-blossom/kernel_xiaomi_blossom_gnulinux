@@ -1,7 +1,7 @@
 #!/bin/busybox sh
 # vars
-rootfs="/dev/mmcblk0p41" # change if necessary, default if root= parameter is missin
-newroot="/mnt/newroot" # change if necessary
+rootfs="/dev/mmcblk0p41" # change if necessary, default if root= parameter is missing
+newroot="/mnt/newroot"   # change if necessary
 switch_init="/sbin/openrc-init" # change if necessary
 root_timeout=25
 
@@ -22,6 +22,45 @@ for arg in $(/bin/busybox cat /proc/cmdline); do
     esac
 done
 
+get_device_model() {
+    hwname=$(
+        /bin/busybox cat /proc/cmdline |
+        /bin/busybox tr ' ' '\n' |
+        /bin/busybox grep '^androidboot.hwname=' |
+        /bin/busybox cut -d= -f2
+    )
+
+    case "$hwname" in
+        angelican)
+            echo "Redmi 9C NFC"
+            ;;
+        angelica)
+            echo "Redmi 9C"
+            ;;
+        dandelion)
+            echo "Redmi 9A / Redmi 10A"
+            ;;
+        cattail)
+            echo "Redmi 9A / Redmi 9 Activ"
+            ;;
+        blossom)
+            echo "Blossom"
+            ;;
+        garden)
+            echo "Garden"
+            ;;
+        *)
+            if [ -f /proc/device-tree/model ]; then
+                /bin/busybox tr -d '\0' < /proc/device-tree/model
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
+}
+
+DEVICE_MODEL=$(get_device_model)
+
 # usb gadget
 /bin/busybox mount -t configfs none /sys/kernel/config 2>/dev/null || true
 /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1
@@ -36,8 +75,14 @@ if [ -d /sys/kernel/config/usb_gadget/g1 ]; then
 
     /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/strings/0x409
     echo "Xiaomi" > /sys/kernel/config/usb_gadget/g1/strings/0x409/manufacturer
-    echo "Redmi 9C NFC" > /sys/kernel/config/usb_gadget/g1/strings/0x409/product
-    SERIALNO=$(/bin/busybox cat /proc/cmdline | /bin/busybox grep -o 'androidboot.serialno=[^ ]*' | /bin/busybox cut -d'=' -f2)
+    echo "$DEVICE_MODEL" > /sys/kernel/config/usb_gadget/g1/strings/0x409/product
+
+    SERIALNO=$(
+        /bin/busybox cat /proc/cmdline |
+        /bin/busybox tr ' ' '\n' |
+        /bin/busybox grep '^androidboot.serialno=' |
+        /bin/busybox cut -d= -f2
+    )
     echo "$SERIALNO" > /sys/kernel/config/usb_gadget/g1/strings/0x409/serialnumber
 
     /bin/busybox mkdir -p /sys/kernel/config/usb_gadget/g1/configs/c.1
@@ -67,6 +112,7 @@ if [ "$acm_success" -eq 1 ]; then
 else
     /bin/busybox echo "Warning: Serial console (ACM) failed to initialize"
 fi
+
 /bin/busybox mkdir -p /mnt/newroot
 
 fail() {
@@ -74,7 +120,7 @@ fail() {
     /bin/busybox printf "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
     /bin/busybox echo "$@"
     /bin/busybox printf "\n"
-    /bin/busybox echo "Here is some debug information:"
+    /bin/busybox echo "Debug information:"
     /bin/busybox dmesg | /bin/busybox grep "Kernel command line"
     /bin/busybox uname -a
     /bin/busybox printf "\n"
@@ -87,7 +133,7 @@ fail() {
     /bin/busybox echo "or connect to the USB ACM serial port (e.g. /dev/ttyACM0 on Linux) on your PC via screen/PuTTY or what have you"
     /bin/busybox printf "\n"
     if [ -c /dev/ttyGS0 ]; then
-        /bin/busybox sh </dev/ttyGS0 >/dev/ttyGS0 2>&0 &
+        /bin/busybox sh </dev/ttyGS0 >/dev/ttyGS0 2>&1 &
     fi
     while true; do
         /bin/busybox sh
