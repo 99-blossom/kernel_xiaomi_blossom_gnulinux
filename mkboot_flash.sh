@@ -27,6 +27,9 @@ cd ..
 
 fastboot flash boot AIK/image-new.img
 
+
 if [ "$FLASH_ROOTFS" = true ]; then
     echo "Flashing rootfs.img to userdata..."
+     fastboot flash userdata rootfs.img
+     fastboot reboot
 fi
