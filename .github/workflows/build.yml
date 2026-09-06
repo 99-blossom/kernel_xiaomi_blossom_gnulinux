@@ -1,0 +1,87 @@
+name: Build kernnel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: https://github.com/99-blossom/kernel_xiaomi_blossom_gnulinux
+  KERNEL_DIR: kernel_src
+  DEFCONFIG: blossom_gnulinux_defconfig
+  CROSS_COMPILE: aarch64-linux-gnu-
+  CLANG_TRIPLE: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            libncurses-dev \
+            git \
+            curl \
+            zip \
+            unzip \
+            python3 \
+            clang \
+            lld \
+            llvm \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
+
+      - name: Clone kernel sources
+        run: |
+          git clone --depth=1 "$KERNEL_REPO" "$KERNEL_DIR"
+
+      - name: Generate defconfig
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          make ARCH=arm64 O=out ${{ env.DEFCONFIG }}
+
+      - name: Build kernel
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          JOBS=$(( $(nproc) + 1 ))
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
+            CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
+            -j"${JOBS}"
+
+      - name: Check build output
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          ls -la out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz
+
+      - name: Prepare release tag
+        id: tag
+        run: |
+          echo "tag_name=build-$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-images
+          path: |
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: Kernel build ${{ steps.tag.outputs.tag_name }}
+          files: |
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
+            ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
