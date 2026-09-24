@@ -1,7 +1,7 @@
-name: Build kernnel
+name: Build kernel
 
 on:
-  workflow_dispatch:
+  push:
 
 permissions:
   contents: write
@@ -12,6 +12,7 @@ env:
   DEFCONFIG: blossom_gnulinux_defconfig
   CROSS_COMPILE: aarch64-linux-gnu-
   CLANG_TRIPLE: aarch64-linux-gnu-
+  CCACHE_DIR: /home/runner/.cache/ccache
 
 jobs:
   build:
@@ -37,12 +38,29 @@ jobs:
             clang \
             lld \
             llvm \
+            ccache \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu
 
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=2G
+          ccache --zero-stats
+          ccache --show-stats
+
       - name: Clone kernel sources
         run: |
-          git clone --depth=1 "$KERNEL_REPO" "$KERNEL_DIR"
+          git clone --depth=1 --no-tags "$KERNEL_REPO" "$KERNEL_DIR"
 
       - name: Generate defconfig
         working-directory: ${{ env.KERNEL_DIR }}
@@ -52,17 +70,26 @@ jobs:
       - name: Build kernel
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          JOBS=$(( $(nproc) + 1 ))
+          JOBS=$(nproc)
           make O=out ARCH=arm64 \
-            CC=clang \
+            CC="ccache clang" \
             CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
             CROSS_COMPILE=${{ env.CROSS_COMPILE }} \
             -j"${JOBS}"
 
+      - name: Show ccache stats
+        if: always()
+        run: |
+          ccache --show-stats
+
       - name: Check build output
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          ls -la out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz
+          test -s out/arch/arm64/boot/Image
+          ls -lh out/arch/arm64/boot/Image
+          if [ -s out/arch/arm64/boot/Image.gz ]; then
+            ls -lh out/arch/arm64/boot/Image.gz
+          fi
 
       - name: Prepare release tag
         id: tag
@@ -76,12 +103,13 @@ jobs:
           path: |
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
+          if-no-files-found: warn
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag_name }}
-          name: Kernel build ${{ steps.tag.outputs.tag_name }}
+          name: ${{ steps.tag.outputs.tag_name }}
           files: |
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image
             ${{ env.KERNEL_DIR }}/out/arch/arm64/boot/Image.gz
