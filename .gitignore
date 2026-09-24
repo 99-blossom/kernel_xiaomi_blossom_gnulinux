@@ -135,6 +135,8 @@ all.config
 *.kdev4
 
 rootfs.img
+rootfs324.img
+rootfs.img.bak
 rootfs/
 trash/
 out/
@@ -142,4 +144,5 @@ magiskboot
 magiskboot_unp/
 magiskboot_unp
 AIK/
-
+hwparam.json
+twc

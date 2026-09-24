@@ -15,4 +15,4 @@ make O=out ARCH=arm64 \
   OBJDUMP=llvm-objdump \
   STRIP=llvm-strip \
   LLVM_IAS=0 \
-  -j$(nproc)
+  -j5

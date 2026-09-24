@@ -11,7 +11,7 @@ done
 sudo -v
 sudo umount -R rootfs/ 2>/dev/null || true
 
-sudo cp out/arch/arm64/boot/Image.gz-dtb AIK/split_img/boot.img-kernel
+sudo cp out/arch/arm64/boot/Image.gz AIK/split_img/boot.img-kernel
 
 sudo rm -rf AIK/ramdisk/*
 sudo cp -a initramfs/src/initramfs/* AIK/ramdisk/
