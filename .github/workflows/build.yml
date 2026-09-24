@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 env:
-  KERNEL_REPO: https://github.com/99-blossom/kernel_xiaomi_blossom_gnulinux
+  KERNEL_REPO: https://github.com/99-blossom/kernel_xiaomi_blossom_linux
   KERNEL_DIR: kernel_src
   DEFCONFIG: blossom_gnulinux_defconfig
   CROSS_COMPILE: aarch64-linux-gnu-
